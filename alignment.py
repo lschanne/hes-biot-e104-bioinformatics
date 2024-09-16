@@ -57,20 +57,29 @@ def global_alignment(
     # NOTE for now I am using only affine gap penalty for ease of
     # implementation; that means gap_extension_penalty is ignored and
     # only gap_penalty is used for both opening and extending gaps
+    gap_extension_penalty = gap_penalty
 
     len1 = len(seq1)
     len2 = len(seq2)
+    if not len1:
+        if not len2:
+            return (0, [("", "")])
+        return (
+            gap_penalty + gap_extension_penalty * (len2 - 1),
+            [("" * len2, seq2)],
+        )
+    elif not len2:
+        return (
+            gap_penalty + gap_extension_penalty * (len1 - 1),
+            [(seq1, "" * len1)],
+        )
+
     scores = np.zeros([len1 + 1, len2 + 1])
-
-    scores[0, :] = np.arange(len2 + 1) * gap_penalty
-    # TODO: introduce gap_extension_penalty
-    # scores[0, :] = np.arange(len2 + 1) * gap_extension_penalty
-    # scores[0, 1] = gap_penalty - gap_extension_penalty
-
-    scores[:, 0] = np.arange(len1 + 1) * gap_penalty
-    # TODO: introduce gap_extension_penalty
-    # scores[:, 0] = np.arange(len1 + 1) * gap_extension_penalty
-    # scores[1, 0] = gap_penalty - gap_extension_penalty
+    scores[0, :] = np.arange(len2 + 1) * gap_extension_penalty
+    scores[0, 1] = gap_penalty
+    scores[:, 0] = np.arange(len1 + 1) * gap_extension_penalty
+    scores[1, 0] = gap_penalty
+    scores = scores.astype(int)
 
     paths = [[None for _ in range(len2)] for _ in range(len1)]
 
@@ -88,50 +97,49 @@ def global_alignment(
             # TODO when you introduce gap_extension_penalty; somehow the best
             # paths for an alignment needs to be able to consider if the a
             # prior path is introducing a new gap or extending an old one
-            for score, path in zip(
-                (left_score, up_score, diag_score), (UP, LEFT, DIAGONAL),
+            for score, path_idx in zip(
+                (left_score, up_score, diag_score), (LEFT, UP, DIAGONAL),
             ):
                 if score > best_score:
+                    these_paths = [False, False, False]
+                    these_paths[path_idx] = True
                     best_score = score
-                    best_paths = [path]
                 elif score == best_score:
-                    best_paths.append(path)
+                    these_paths[path_idx] = True
             scores[iii + 1, jjj + 1] = best_score
-            paths[iii][jjj] = best_paths
+            paths[iii][jjj] = these_paths
 
-    alignment_score = int(best_score)
-    # TODO need some recursive programming to get all possible alignments from
-    # the paths
-    alignment1 = seq1[-1]
-    alignment2 = seq2[-1]
-    while iii and jjj:
-        path = paths[iii][jjj][0]
-        if path == UP:
-            jjj -= 1
-            alignment1 = GAP + alignment1
-            alignment2 = seq2[jjj] + alignment2
-        elif path == LEFT:
-            iii -= 1
-            alignment1 = seq1[iii] + alignment1
-            alignment2 = GAP + alignment2
-        elif path == DIAGONAL:
-            iii -= 1
-            jjj -= 1
-            alignment1 = seq1[iii] + alignment1
-            alignment2 = seq2[jjj] + alignment2
-    if iii:
-        alignment1 = seq1[:iii] + alignment1
-        alignment2 = GAP * iii + alignment2
-    elif jjj:
-        alignment1 = GAP * jjj + alignment1
-        alignment2 = seq2[:jjj] + alignment2
-    return alignment_score, [(alignment1, alignment2)]
-
-seq1="AACTT"
-seq2="ACAT"
-match_score=3
-mismatch_penalty=-1
-gap_penalty=-7
+    alignments = []
+    def _build_alignments(alignment1, alignment2, idx1, idx2):
+        if idx1 <= 0 and idx2 <= 0:
+            alignments.append((alignment1, alignment2))
+            return
+        these_paths = paths[idx1][idx2]
+        if these_paths[UP]:
+            _build_alignments(
+                GAP + alignment1,
+                seq2[idx2 - 1] + alignment2,
+                idx1,
+                idx2 - 1,
+            )
+        if these_paths[LEFT]:
+            _build_alignments(
+                seq1[idx1 - 1] + alignment1,
+                GAP + alignment2,
+                idx1 - 1,
+                idx2,
+            )
+        if these_paths[DIAGONAL]:
+            _build_alignments(
+                seq1[idx1 - 1] + alignment1,
+                seq2[idx2 - 1] + alignment2,
+                idx1 - 1,
+                idx2 - 1,
+            )
+        return
+    
+    _build_alignments(seq1[-1], seq2[-1], iii, jjj)
+    return best_score, alignments
 
 if __name__ == "__main__":
     # TODO add some argparse to make this a proper script
@@ -143,6 +151,4 @@ if __name__ == "__main__":
         gap_penalty=-7,
     )
     print(alignment_score)
-    alignment1, alignment2 = alignments[0]
-    print(alignment1)
-    print(alignment2)
+    print(alignments)
